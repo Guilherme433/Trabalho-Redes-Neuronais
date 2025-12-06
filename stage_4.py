@@ -9,10 +9,6 @@ import numpy as np
 import time
 import torch.nn.functional as F
 
-# ====================================================================
-# 1. Arquitetura ResNet-18 Adaptada para CIFAR-10
-# ====================================================================
-
 class BasicBlock(nn.Module):
     expansion = 1
 
@@ -73,12 +69,7 @@ class ResNet18CIFAR(nn.Module):
         out = self.linear(out)
         return out
 
-# ====================================================================
-# 2. Setup de Dados
-# ====================================================================
-
 def setup_sota_data(batch_size=128):
-    print("A preparar dados com Standard Augmentation...")
     train_transform = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -104,7 +95,6 @@ def setup_sota_data(batch_size=128):
     train_idx, val_idx = indices[split:], indices[:split]
     train_subset = Subset(trainset, train_idx)
     
-    # Validação sem augmentation (Clean)
     val_dataset_clean = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=test_transform)
     val_subset = Subset(val_dataset_clean, val_idx)
 
@@ -127,15 +117,14 @@ def train_sota(model, trainloader, valloader, epochs=200):
     val_stats = {'loss': [], 'acc': []}
     lrs = []
     
-    best_val_acc = 0.0  # Para controlo do Checkpoint
+    best_val_acc = 0.0  # Checkpoint
 
     print(f"Início do Treino SOTA (ResNet-18) em {device} por {epochs} epochs...")
     total_start_time = time.time()
 
     for epoch in range(epochs):
-        epoch_start = time.time() # Início da contagem da época
-        
-        # --- TREINO ---
+        epoch_start = time.time() 
+   
         model.train()
         running_loss = 0
         correct = 0
@@ -162,7 +151,6 @@ def train_sota(model, trainloader, valloader, epochs=200):
         train_stats['loss'].append(t_loss)
         train_stats['acc'].append(t_acc)
 
-        # --- VALIDAÇÃO ---
         model.eval()
         v_loss = 0
         v_correct = 0
@@ -182,18 +170,15 @@ def train_sota(model, trainloader, valloader, epochs=200):
         val_stats['loss'].append(val_loss)
         val_stats['acc'].append(val_acc)
         
-        # --- CHECKPOINTING (Guardar Melhor Modelo) ---
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save(model.state_dict(), 'resnet18_cifar_stage4_best.pth')
             saved_msg = "-> Modelo Guardado!"
         else:
             saved_msg = ""
-        
-        # Cálculo do tempo da época
+
         epoch_duration = time.time() - epoch_start
 
-        # PRINT A CADA ÉPOCA
         print(f"Epoch {epoch+1}/{epochs} | Time: {epoch_duration:.1f}s | LR: {lrs[-1]:.4f} | "
               f"Train Acc: {t_acc:.4f} | Val Acc: {val_acc:.4f} {saved_msg}")
 
@@ -209,15 +194,12 @@ def main():
     params = sum(p.numel() for p in model.parameters())
     print(f"ResNet-18 Parameters: {params/1e6:.2f}M")
 
-    # Treino
     train_stats, val_stats, lrs, total_time = train_sota(model, trainloader, valloader, epochs=200)
 
-    # Carregar Melhor Modelo para Teste Final
-    print("\nA carregar o melhor modelo guardado para avaliação final...")
+    # Avaliação Final 
     best_model_path = 'resnet18_cifar_stage4_best.pth'
     model.load_state_dict(torch.load(best_model_path))
     
-    # Avaliação Final Test Set
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
@@ -260,10 +242,6 @@ def main():
     plt.tight_layout()
     plt.show()
 
-    # ====================================================================
-    # RESUMO FINAL PARA EXCEL/RELATÓRIO
-    # ====================================================================
-    
     # Preparar métricas
     best_val_acc = max(val_stats['acc'])
     best_train_acc = max(train_stats['acc'])
@@ -271,9 +249,6 @@ def main():
     best_val_loss = min(val_stats['loss'])
     final_val_loss = val_stats['loss'][-1]
     
-    print("\n" + "="*140)
-    print("STAGE 4: RESUMO FINAL (ResNet-18 SOTA)")
-    print("="*140)
     header = f"{'Model':<15} | {'Params(M)':<10} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
     print("-" * len(header))
