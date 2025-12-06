@@ -10,14 +10,9 @@ import seaborn as sns
 import numpy as np
 import time
 
-# ====================================================================
-# I. Definição do Modelo (Stage 1 Requirement: <1M params)
-# ====================================================================
-
 class BaselineCNN(nn.Module):
     def __init__(self):
         super().__init__()
-        # Arquitetura simples com 3 blocos convolucionais
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -43,28 +38,20 @@ class BaselineCNN(nn.Module):
         x = self.classifier(x)
         return x
 
-# ====================================================================
-# II. Funções de Setup e Treino
-# ====================================================================
-
 def setup_data(batch_size=128, validation_split=0.1):
-    # Sem Data Augmentation na Stage 1, apenas conversão para Tensor
     transform = transforms.Compose([
         transforms.ToTensor()
     ])
 
-    # Carregamento dos Dados
     full_trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                                download=True, transform=transform)
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, 
                                          download=True, transform=transform)
 
-    # Divisão Treino/Validação
     dataset_size = len(full_trainset)
     indices = list(range(dataset_size))
     split = int(np.floor(validation_split * dataset_size))
 
-    # Seed fixa para garantir que todos os modelos treinam nos mesmos dados
     np.random.seed(42)
     np.random.shuffle(indices)
     train_indices, val_indices = indices[split:], indices[:split]
@@ -72,7 +59,7 @@ def setup_data(batch_size=128, validation_split=0.1):
     train_subset = Subset(full_trainset, train_indices)
     val_subset = Subset(full_trainset, val_indices)
 
-    # Dataloaders
+    #Dataloaders
     trainloader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
     valloader = DataLoader(val_subset, batch_size=batch_size, shuffle=False)
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=False)
@@ -80,7 +67,6 @@ def setup_data(batch_size=128, validation_split=0.1):
     return trainloader, valloader, testloader, testset
 
 def evaluate(model, dataloader, criterion, device):
-    """Calcula métricas sem treinar (usado para validação e teste)"""
     model.eval()
     running_loss = 0
     correct = 0
@@ -103,7 +89,6 @@ def evaluate(model, dataloader, criterion, device):
     return running_loss / total, correct / total, all_preds, all_labels
 
 def train_one_epoch(model, trainloader, criterion, optimizer, device):
-    """Treina o modelo por uma única época"""
     model.train()
     running_loss = 0
     correct, total = 0, 0
@@ -124,25 +109,18 @@ def train_one_epoch(model, trainloader, criterion, optimizer, device):
         
     return running_loss / total, correct / total
 
-# ====================================================================
-# III. Loop Principal da Grid Search
-# ====================================================================
-
 def run_experiment_grid():
-    # Verifica GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"A utilizar dispositivo: {device}")
     
-    # --- NOVO: Print da quantidade de Parâmetros ---
     dummy_model = BaselineCNN()
     total_params = sum(p.numel() for p in dummy_model.parameters())
     print(f"\n[INFO] Total parameters: {total_params} (Target: <1M)")
-    # -----------------------------------------------
 
-    # 1. Preparar Dados
+    # preparação dos dados
     trainloader, valloader, testloader, testset = setup_data()
     
-    # 2. Definir Configurações (Produto Cartesiano Completo)
+    # Definição Configurações
     optimizers = ["SGD", "Adam"]
     learning_rates = [0.1, 0.01, 0.001]
     
@@ -157,7 +135,7 @@ def run_experiment_grid():
     best_model_preds = None
     best_config_name = ""
     
-    num_epochs = 50 # Requisito do guião
+    num_epochs = 50 
     
     print(f"\n--- A iniciar Grid Search: {len(configs)} combinações ---")
     
@@ -168,14 +146,12 @@ def run_experiment_grid():
         
         print(f"\n> A treinar: {run_name} ...")
         
-        # Instanciar Modelo de novo (reset pesos)
         model = BaselineCNN().to(device)
         criterion = nn.CrossEntropyLoss()
         
-        # Configurar Otimizador
         if opt_name == "SGD":
             optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-        else: # Adam
+        else:
             optimizer = optim.Adam(model.parameters(), lr=lr)
             
         # Variáveis de histórico
@@ -198,20 +174,17 @@ def run_experiment_grid():
         
         duration = time.time() - start_time
         
-        # Cálculos Finais para esta Configuração
         final_val_acc = val_acc_history[-1]
         best_val_acc = max(val_acc_history)   
         best_train_acc = max(train_acc_history) 
         
         # Avaliação Final no Test Set
-        test_loss, test_acc, _, _ = evaluate(model, testloader, criterion, device)
+        _, test_acc, _, _ = evaluate(model, testloader, criterion, device)
         
         # Guardar resultados
         results[run_name] = {
             "val_acc": val_acc_history,           
             "train_loss": train_loss_history,     
-            
-            # Métricas para Tabela
             "time": duration,
             "best_train_acc": best_train_acc,     
             "final_train_loss": train_loss_history[-1],
@@ -223,7 +196,6 @@ def run_experiment_grid():
         
         print(f"  [{run_name}] Terminado | Best Val Acc: {best_val_acc:.4f} | Test Acc: {test_acc:.4f}")
         
-        # Verificar se é o melhor modelo (usando Best Val Acc como critério)
         if best_val_acc > best_overall_val_acc:
             best_overall_val_acc = best_val_acc
             best_model_preds = (preds, labels)
@@ -233,13 +205,9 @@ def run_experiment_grid():
                 "best_train_acc": best_train_acc
             }
 
-    # ====================================================================
-    # IV. Geração de Resultados (Plots e Tabelas)
-    # ====================================================================
-
     epochs_range = range(1, num_epochs + 1)
     
-    # GRÁFICO 1: Accuracy de Validação (Comparativo)
+    # Accuracy de Validação 
     plt.figure(figsize=(12, 6))
     for name, data in results.items():
         plt.plot(epochs_range, data["val_acc"], label=name, linewidth=2)
@@ -250,7 +218,7 @@ def run_experiment_grid():
     plt.grid(True, alpha=0.3)
     plt.show()
     
-    # GRÁFICO 2: Loss de Treino (Para ver instabilidade)
+    #Loss de Treino
     plt.figure(figsize=(12, 6))
     for name, data in results.items():
         plt.plot(epochs_range, data["train_loss"], label=name, linewidth=1.5)
@@ -262,7 +230,7 @@ def run_experiment_grid():
     plt.grid(True, alpha=0.3)
     plt.show()
 
-    # GRÁFICO 3: Matriz de Confusão (Apenas do Vencedor)
+    # Matriz de Confusão do melhor modelo
     print(f"\nMelhor Modelo (por Validação): {best_config_name}")
     print(f"  - Best Val Acc: {best_overall_val_acc:.4f}")
     print(f"  - Best Train Acc: {best_model_info['best_train_acc']:.4f}")
@@ -279,11 +247,6 @@ def run_experiment_grid():
         plt.ylabel('Verdadeiro')
         plt.xlabel('Previsto')
         plt.show()
-
-    # TABELA PARA EXCEL
-    print("\n" + "="*140)
-    print("DADOS PARA O EXCEL (Copia estas linhas)")
-    print("="*140)
     
     header = f"{'Config':<20} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
