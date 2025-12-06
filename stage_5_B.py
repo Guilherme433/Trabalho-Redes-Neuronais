@@ -9,10 +9,7 @@ import numpy as np
 import time
 import torch.nn.functional as F
 
-# ====================================================================
-# 1. Arquitetura: SE-ResNet-18 (Igual ao Stage 5 Full)
-#    (Mantemos a melhoria de arquitetura para isolar a falta do MixUp)
-# ====================================================================
+#Ablation B: Remover MixUp, manter SE-Block e Label Smoothing
 
 class SEBlock(nn.Module):
     def __init__(self, channel, reduction=16):
@@ -41,7 +38,7 @@ class SEBasicBlock(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
 
-        # SE Block presente
+        # SE Block
         self.se = SEBlock(planes)
 
         self.shortcut = nn.Sequential()
@@ -97,10 +94,6 @@ class SEResNet18(nn.Module):
         out = self.linear(out)
         return out
 
-# ====================================================================
-# 2. Setup e Loop de Treino
-# ====================================================================
-
 def setup_data(batch_size=128):
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -140,7 +133,7 @@ def train_ablation(model, trainloader, valloader, epochs=200):
     model.to(device)
     print(f"Device: {device}")
 
-    # Mantemos Label Smoothing (Para isolar apenas a falta do MixUp)
+    # Label Smoothing
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -207,7 +200,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
         val_stats['loss'].append(val_loss)
         val_stats['acc'].append(val_acc)
 
-        # Checkpointing
         saved_msg = ""
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -215,7 +207,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
             saved_msg = "-> Saved!"
 
         duration = time.time() - epoch_start
-        # Print menos verboso
         if (epoch+1) % 5 == 0 or epoch == 0:
             print(f"Epoch {epoch+1}/{epochs} | Time: {duration:.1f}s | "
                   f"Train Acc: {t_acc:.4f} | Val Acc: {val_acc:.4f} {saved_msg}")
@@ -224,14 +215,10 @@ def train_ablation(model, trainloader, valloader, epochs=200):
     print(f"\nTreino Concluído. Tempo Total: {total_time/60:.2f} min.")
     return train_stats, val_stats, lrs, total_time
 
-# ====================================================================
-# 3. Main Execution
-# ====================================================================
-
 def main():
     trainloader, valloader, testloader = setup_data(batch_size=128)
 
-    # Instanciar Modelo COM SEBlock (Igual ao Stage 5 Full)
+    # Instanciar Modelo COM SEBlock
     model = SEResNet18(num_classes=10)
     params = sum(p.numel() for p in model.parameters())
     print(f"SE-ResNet-18 Parameters: {params/1e6:.2f}M")
@@ -240,7 +227,6 @@ def main():
     t_stats, v_stats, lrs, total_time = train_ablation(model, trainloader, valloader, epochs=200)
 
     # Avaliação Final
-    print("\nA carregar melhor modelo para avaliação...")
     model.load_state_dict(torch.load('resnet18_ablation_B_best.pth'))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -258,14 +244,11 @@ def main():
     
     final_acc = 100 * correct / total
     print(f"\nFinal Test Set Accuracy (Ablation B - No MixUp): {final_acc:.2f}%")
-    
-    # ====================================================================
-    # 5. Plots (ADICIONADO)
-    # ====================================================================
+
     epochs_range = range(1, 201)
     plt.figure(figsize=(15, 5))
     
-    # Gráfico 1: Accuracy
+    # Accuracy
     plt.subplot(1, 3, 1)
     plt.plot(epochs_range, t_stats['acc'], label='Train')
     plt.plot(epochs_range, v_stats['acc'], label='Val')
@@ -275,7 +258,7 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    # Gráfico 2: Loss
+    # Loss
     plt.subplot(1, 3, 2)
     plt.plot(epochs_range, t_stats['loss'], label='Train Loss')
     plt.plot(epochs_range, v_stats['loss'], label='Val Loss')
@@ -285,7 +268,7 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    # Gráfico 3: Learning Rate
+    # Learning Rate
     plt.subplot(1, 3, 3)
     plt.plot(epochs_range, lrs, color='green')
     plt.title('Learning Rate Schedule')
@@ -295,20 +278,13 @@ def main():
     
     plt.tight_layout()
     plt.show()
-
-    # ====================================================================
-    # RESUMO FINAL PARA EXCEL/RELATÓRIO
-    # ====================================================================
     
     best_val_acc = max(v_stats['acc'])
     best_train_acc = max(t_stats['acc'])
     final_train_loss = t_stats['loss'][-1]
     best_val_loss = min(v_stats['loss'])
     final_val_loss = v_stats['loss'][-1]
-    
-    print("\n" + "="*140)
-    print("ABLATION STUDY B: REMOVER MIXUP (SE-ResNet + LS only)")
-    print("="*140)
+
     header = f"{'Model':<15} | {'Params(M)':<10} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
     print("-" * len(header))
