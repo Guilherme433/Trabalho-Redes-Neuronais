@@ -297,9 +297,6 @@ def main():
     best_val_loss = min(v_stats['loss'])
     final_val_loss = v_stats['loss'][-1]
     
-    print("\n" + "="*140)
-    print("STAGE 5: RESUMO FINAL (Improved SOTA)")
-    print("="*140)
     header = f"{'Model':<15} | {'Params(M)':<10} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
     print("-" * len(header))
