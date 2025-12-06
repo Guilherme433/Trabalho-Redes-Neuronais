@@ -9,9 +9,7 @@ import numpy as np
 import time
 import torch.nn.functional as F
 
-# ====================================================================
-# 1. Componente Novo: Squeeze-and-Excitation (SE) Block [Modificação 1]
-# ====================================================================
+# Mixup + SE-ResNet-18 + Label Smoothing
 
 class SEBlock(nn.Module):
     def __init__(self, channel, reduction=16):
@@ -29,10 +27,6 @@ class SEBlock(nn.Module):
         y = self.avg_pool(x).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         return x * y.expand_as(x)
-
-# ====================================================================
-# 2. Arquitetura Melhorada: ResNet-18 + SE Blocks
-# ====================================================================
 
 class SEBasicBlock(nn.Module):
     expansion = 1
@@ -58,7 +52,6 @@ class SEBasicBlock(nn.Module):
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         
-        # Aplicação da atenção do SE Block antes da soma residual
         out = self.se(out) 
 
         out += self.shortcut(x)
@@ -70,11 +63,9 @@ class SEResNet18(nn.Module):
         super(SEResNet18, self).__init__()
         self.in_planes = 64
 
-        # Stem adaptado para CIFAR-10 (Igual ao Stage 4)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         
-        # Usamos SEBasicBlock em vez de BasicBlock
         self.layer1 = self._make_layer(SEBasicBlock, 64, 2, stride=1)
         self.layer2 = self._make_layer(SEBasicBlock, 128, 2, stride=2)
         self.layer3 = self._make_layer(SEBasicBlock, 256, 2, stride=2)
@@ -102,12 +93,7 @@ class SEResNet18(nn.Module):
         out = self.linear(out)
         return out
 
-# ====================================================================
-# 3. Funções Auxiliares: MixUp [Modificação 2]
-# ====================================================================
-
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
-    '''Retorna dados misturados e pares de labels (y_a, y_b) e lambda'''
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:
@@ -124,16 +110,9 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
     return mixed_x, y_a, y_b, lam
 
 def mixup_criterion(criterion, pred, y_a, y_b, lam):
-    '''Loss function para MixUp: combinação linear das losses'''
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
-# ====================================================================
-# 4. Setup e Loop de Treino
-# ====================================================================
-
 def setup_data(batch_size=128):
-    # O pipeline de dados é o mesmo do Stage 4 (aumento básico)
-    # O MixUp é aplicado dentro do loop de treino.
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -149,7 +128,6 @@ def setup_data(batch_size=128):
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
 
-    # Split Validação (Seed Fixa)
     indices = list(range(len(trainset)))
     split = int(np.floor(0.1 * len(trainset)))
     np.random.seed(42)
@@ -173,7 +151,7 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
     model.to(device)
     print(f"Device: {device}")
 
-    # Modificação 3: Label Smoothing
+    # Label Smoothing
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -183,7 +161,6 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
     val_stats = {'loss': [], 'acc': []}
     lrs = []
     
-    # Variável para Checkpoint
     best_val_acc = 0.0
 
     print(f"Início do Treino Stage 5 (SE-ResNet + MixUp + LabelSmooth) por {epochs} epochs...")
@@ -200,7 +177,7 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
 
-            # --- Aplicação do MixUp ---
+            # MixUp 
             inputs, targets_a, targets_b, lam = mixup_data(inputs, targets, alpha=1.0, use_cuda=True)
             inputs, targets_a, targets_b = map(torch.autograd.Variable, (inputs, targets_a, targets_b))
             
@@ -212,7 +189,6 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
 
             running_loss += loss.item() * inputs.size(0)
             
-            # Accuracy aproximada no treino
             _, predicted = outputs.max(1)
             total += targets.size(0)
             if lam > 0.5:
@@ -228,7 +204,6 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
         train_stats['loss'].append(t_loss)
         train_stats['acc'].append(t_acc)
 
-        # Validação (Clean)
         model.eval()
         v_loss = 0
         v_correct = 0
@@ -248,7 +223,6 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
         val_stats['loss'].append(val_loss)
         val_stats['acc'].append(val_acc)
 
-        # --- Checkpointing (Guardar Melhor Modelo) ---
         saved_msg = ""
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -263,23 +237,16 @@ def train_improved_sota(model, trainloader, valloader, epochs=200):
     print(f"\nTreino Concluído. Tempo Total: {total_time/60:.2f} min.")
     return train_stats, val_stats, lrs, total_time
 
-# ====================================================================
-# 5. Main Execution
-# ====================================================================
-
 def main():
     trainloader, valloader, testloader = setup_data(batch_size=128)
 
-    # Modelo melhorado
     model = SEResNet18(num_classes=10)
     params = sum(p.numel() for p in model.parameters())
     print(f"SE-ResNet-18 Parameters: {params/1e6:.2f}M")
-    
-    # Treino
+
     t_stats, v_stats, lrs, total_time = train_improved_sota(model, trainloader, valloader, epochs=200)
 
-    # Avaliação Final Test Set (Melhor Modelo)
-    print("\nA carregar o melhor modelo para avaliação final...")
+    # Avaliação Final
     model.load_state_dict(torch.load('se_resnet18_stage5_best.pth'))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -298,7 +265,7 @@ def main():
     final_acc = 100 * correct / total
     print(f"\nFinal Test Set Accuracy (Improved Model): {final_acc:.2f}%")
     
-    # Plots
+    # Plots da Acc, Loss, lr
     epochs_range = range(1, 201)
     plt.figure(figsize=(15, 5))
     
@@ -323,10 +290,6 @@ def main():
     
     plt.tight_layout()
     plt.show()
-
-    # ====================================================================
-    # RESUMO FINAL PARA EXCEL/RELATÓRIO
-    # ====================================================================
     
     best_val_acc = max(v_stats['acc'])
     best_train_acc = max(t_stats['acc'])
