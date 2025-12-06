@@ -9,10 +9,7 @@ import numpy as np
 import time
 import torch.nn.functional as F
 
-# ====================================================================
-# 1. Arquitetura: ResNet-18 Standard (SEM SEBlock)
-#    (Revertemos para o BasicBlock normal para o Teste A)
-# ====================================================================
+# Ablation A: Remover SE-Block, manter MixUp e Label Smoothing
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -43,11 +40,9 @@ class ResNet18NoSE(nn.Module):
         super(ResNet18NoSE, self).__init__()
         self.in_planes = 64
 
-        # Stem adaptado para CIFAR-10
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         
-        # Usamos BasicBlock NORMAL (Sem SE)
         self.layer1 = self._make_layer(BasicBlock, 64, 2, stride=1)
         self.layer2 = self._make_layer(BasicBlock, 128, 2, stride=2)
         self.layer3 = self._make_layer(BasicBlock, 256, 2, stride=2)
@@ -75,12 +70,8 @@ class ResNet18NoSE(nn.Module):
         out = self.linear(out)
         return out
 
-# ====================================================================
-# 2. Funções Auxiliares: MixUp (Mantemos igual ao Stage 5)
-# ====================================================================
 
 def mixup_data(x, y, alpha=1.0, use_cuda=True):
-    '''Retorna dados misturados e pares de labels (y_a, y_b) e lambda'''
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:
@@ -99,9 +90,6 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
 def mixup_criterion(criterion, pred, y_a, y_b, lam):
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
-# ====================================================================
-# 3. Setup e Loop de Treino
-# ====================================================================
 
 def setup_data(batch_size=128):
     transform_train = transforms.Compose([
@@ -142,7 +130,7 @@ def train_ablation(model, trainloader, valloader, epochs=200):
     model.to(device)
     print(f"Device: {device}")
 
-    # Mantemos Label Smoothing (Para isolar apenas a falta do SEBlock)
+    # Label Smoothing
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -168,7 +156,7 @@ def train_ablation(model, trainloader, valloader, epochs=200):
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
 
-            # Mantemos MixUp ON
+            # MixUp
             inputs, targets_a, targets_b, lam = mixup_data(inputs, targets, alpha=1.0, use_cuda=True)
             inputs, targets_a, targets_b = map(torch.autograd.Variable, (inputs, targets_a, targets_b))
             
@@ -195,7 +183,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
         train_stats['loss'].append(t_loss)
         train_stats['acc'].append(t_acc)
 
-        # Validação
         model.eval()
         v_loss = 0
         v_correct = 0
@@ -215,7 +202,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
         val_stats['loss'].append(val_loss)
         val_stats['acc'].append(val_acc)
 
-        # Checkpointing
         saved_msg = ""
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -223,7 +209,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
             saved_msg = "-> Saved!"
 
         duration = time.time() - epoch_start
-        # Print menos verboso
         if (epoch+1) % 5 == 0 or epoch == 0:
             print(f"Epoch {epoch+1}/{epochs} | Time: {duration:.1f}s | "
                   f"Train Loss: {t_loss:.4f} | Val Acc: {val_acc:.4f} {saved_msg}")
@@ -231,10 +216,6 @@ def train_ablation(model, trainloader, valloader, epochs=200):
     total_time = time.time() - total_start
     print(f"\nTreino Concluído. Tempo Total: {total_time/60:.2f} min.")
     return train_stats, val_stats, lrs, total_time
-
-# ====================================================================
-# 4. Main Execution
-# ====================================================================
 
 def main():
     trainloader, valloader, testloader = setup_data(batch_size=128)
@@ -244,15 +225,12 @@ def main():
     params = sum(p.numel() for p in model.parameters())
     print(f"ResNet-18 (No SE) Parameters: {params/1e6:.2f}M")
     
-    # Treino
     t_stats, v_stats, lrs, total_time = train_ablation(model, trainloader, valloader, epochs=200)
 
     # Avaliação Final
-    print("\nA carregar melhor modelo para avaliação...")
     model.load_state_dict(torch.load('resnet18_ablation_A_best.pth'))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
     model.to(device)
     model.eval()
     correct = 0
@@ -268,13 +246,10 @@ def main():
     final_acc = 100 * correct / total
     print(f"\nFinal Test Set Accuracy (Ablation A - No SE): {final_acc:.2f}%")
 
-    # ====================================================================
-    # 5. Plots (ADICIONADO)
-    # ====================================================================
     epochs_range = range(1, 201)
     plt.figure(figsize=(15, 5))
     
-    # Gráfico 1: Accuracy
+    # Accuracy
     plt.subplot(1, 3, 1)
     plt.plot(epochs_range, t_stats['acc'], label='Train (MixUp)')
     plt.plot(epochs_range, v_stats['acc'], label='Val (Clean)')
@@ -284,7 +259,7 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    # Gráfico 2: Loss
+    # Loss
     plt.subplot(1, 3, 2)
     plt.plot(epochs_range, t_stats['loss'], label='Train Loss')
     plt.plot(epochs_range, v_stats['loss'], label='Val Loss')
@@ -294,7 +269,7 @@ def main():
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    # Gráfico 3: Learning Rate
+    # Learning Rate
     plt.subplot(1, 3, 3)
     plt.plot(epochs_range, lrs, color='green')
     plt.title('Learning Rate Schedule')
@@ -305,19 +280,12 @@ def main():
     plt.tight_layout()
     plt.show()
     
-    # ====================================================================
-    # RESUMO FINAL PARA EXCEL/RELATÓRIO
-    # ====================================================================
-    
     best_val_acc = max(v_stats['acc'])
     best_train_acc = max(t_stats['acc'])
     final_train_loss = t_stats['loss'][-1]
     best_val_loss = min(v_stats['loss'])
     final_val_loss = v_stats['loss'][-1]
     
-    print("\n" + "="*140)
-    print("ABLATION STUDY A: REMOVER SE-BLOCK (ResNet18 + MixUp + LS)")
-    print("="*140)
     header = f"{'Model':<15} | {'Params(M)':<10} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
     print("-" * len(header))
