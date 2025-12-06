@@ -10,12 +10,7 @@ import seaborn as sns
 import numpy as np
 import time
 
-# ====================================================================
-# I. Componentes Modernos (Stochastic Depth & MixUp Utils)
-# ====================================================================
-
 def mixup_data(x, y, alpha=1.0, device='cuda'):
-    '''Retorna dados misturados (mixed inputs) e pares de labels (targets)'''
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:
@@ -29,29 +24,22 @@ def mixup_data(x, y, alpha=1.0, device='cuda'):
     return mixed_x, y_a, y_b, lam
 
 def mixup_criterion(criterion, pred, y_a, y_b, lam):
-    '''Calcula a loss combinada para MixUp'''
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
 class ResidualBlock(nn.Module):
-    """
-    Bloco Residual com Stochastic Depth
-    """
     def __init__(self, in_channels, out_channels, stride=1, stochastic_depth_prob=0.0):
         super(ResidualBlock, self).__init__()
         self.sd_prob = stochastic_depth_prob
-        
-        # 1ª Convolução
+
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, 
-                               stride=stride, padding=1, bias=False)
+        stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        
-        # 2ª Convolução
+
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, 
-                               stride=1, padding=1, bias=False)
+        stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
-        
-        # Atalho
+
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -64,7 +52,7 @@ class ResidualBlock(nn.Module):
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         
-        # Lógica de Stochastic Depth (Drop Path)
+        #Stochastic Depth
         if self.training and self.sd_prob > 0:
             keep_prob = 1 - self.sd_prob
             mask = torch.bernoulli(torch.full((x.shape[0], 1, 1, 1), keep_prob, device=x.device))
@@ -148,7 +136,6 @@ def setup_data_stage3(batch_size=128, validation_split=0.1):
 
     train_subset = Subset(full_trainset, train_indices)
     
-    # Correção para Validação Limpa (sem aug):
     val_raw = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_test)
     val_subset_clean = Subset(val_raw, val_indices)
 
@@ -162,9 +149,6 @@ def setup_data_stage3(batch_size=128, validation_split=0.1):
 
     return trainloader, valloader, testloader, testset
 
-# ====================================================================
-# III. Funções de Treino (Com MixUp e Stats)
-# ====================================================================
 
 def evaluate(model, dataloader, criterion, device):
     model.eval()
@@ -195,9 +179,7 @@ def train_modern_model(model, trainloader, valloader, criterion, optimizer, devi
     print(f"\nInício do Treino (Stage 3) em: {device}")
     total_start = time.time()
     
-    # --- CHECKPOINTING ---
     best_val_acc = 0.0
-    # ---------------------
 
     for epoch in range(num_epochs):
         epoch_start = time.time()
@@ -219,8 +201,7 @@ def train_modern_model(model, trainloader, valloader, criterion, optimizer, devi
             optimizer.step()
 
             running_loss += loss.item() * images.size(0)
-            
-            # Acc aproximada no treino (comparando com label original)
+
             _, predicted = outputs.max(1)
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item() 
@@ -230,8 +211,7 @@ def train_modern_model(model, trainloader, valloader, criterion, optimizer, devi
         
         # Validação
         val_loss, val_acc, _, _ = evaluate(model, valloader, criterion, device)
-        
-        # --- CHECKPOINTING: Guardar Modelo se for o Melhor ---
+
         saved_msg = ""
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -253,7 +233,6 @@ def train_modern_model(model, trainloader, valloader, criterion, optimizer, devi
     total_time = time.time() - total_start
     print(f"Tempo Total: {total_time/60:.2f} min.")
     
-    # Retornar Dicionário com Stats
     stats = {
         "train_losses": train_losses,
         "val_losses": val_losses,
@@ -300,18 +279,12 @@ def plot_results(stats, all_labels, all_preds, testset):
     plt.title('Confusion Matrix (Stage 3 Best Model)')
     plt.show()
 
-# ====================================================================
-# IV. Execução Principal
-# ====================================================================
-
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"A utilizar dispositivo: {device}")
 
-    # 1. Dados
     trainloader, valloader, testloader, testset = setup_data_stage3()
 
-    # 2. Modelo
     model = Stage3ModernCNN(num_classes=10, stochastic_depth_rate=0.2)
     
     total_params = sum(p.numel() for p in model.parameters())
@@ -320,7 +293,6 @@ def main():
     # Label Smoothing
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     
-    # Otimizador (SGD standard)
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0) 
 
     # 3. Treino
@@ -328,24 +300,14 @@ def main():
         model, trainloader, valloader, criterion, optimizer, device, num_epochs=50
     )
 
-    # 4. Avaliação Final
-    # --- Carregar Melhor Modelo ---
-    print("\nA carregar o melhor modelo guardado (stage3_best_model.pth)...")
     model.load_state_dict(torch.load('stage3_best_model.pth'))
-    # ------------------------------
 
     print("Avaliação Final no Test Set (Melhor Modelo):")
     test_loss, test_acc, preds, labels = evaluate(model, testloader, criterion, device)
     stats["test_acc"] = test_acc # Adiciona ao dicionário
     print(f"Stage 3 Test Accuracy: {test_acc:.4f}")
     
-    # 5. Plots
     plot_results(stats, labels, preds, testset)
-    
-    # 6. TABELA PARA EXCEL
-    print("\n" + "="*140)
-    print("STAGE 3: RESUMO FINAL PARA EXCEL")
-    print("="*140)
     
     header = f"{'Model':<15} | {'Params':<10} | {'Time(m)':<8} | {'Best Train Acc':<15} | {'Train Final Loss':<18} | {'Best Val Acc':<15} | {'Test Acc':<10} | {'Val Best Loss':<15} | {'Val Final Loss':<15}"
     print(header)
